@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+
+# Expo
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Native builds
+android/
+ios/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+
+# Example app builds
+example/android/
+example/ios/
+example/.expo/
+example/node_modules/

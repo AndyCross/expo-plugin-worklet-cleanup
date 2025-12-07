@@ -1,0 +1,47 @@
+{
+  "name": "expo-plugin-worklet-cleanup",
+  "version": "1.0.0",
+  "description": "Expo config plugin to prevent worklet crashes on iOS app force-quit (react-native-worklets-core, react-native-reanimated, react-native-filament)",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "files": [
+    "build",
+    "app.plugin.js"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "clean": "rm -rf build"
+  },
+  "keywords": [
+    "expo",
+    "expo-plugin",
+    "react-native",
+    "worklets",
+    "reanimated",
+    "filament",
+    "crash",
+    "force-quit",
+    "ios",
+    "cleanup"
+  ],
+  "author": "Andy Cross",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AndyCross/expo-plugin-worklet-cleanup"
+  },
+  "bugs": {
+    "url": "https://github.com/AndyCross/expo-plugin-worklet-cleanup/issues"
+  },
+  "homepage": "https://github.com/AndyCross/expo-plugin-worklet-cleanup#readme",
+  "peerDependencies": {
+    "expo": ">=49.0.0"
+  },
+  "devDependencies": {
+    "@expo/config-plugins": "^8.0.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {}
+}
