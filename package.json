@@ -1,6 +1,6 @@
 {
   "name": "expo-plugin-worklet-cleanup",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Expo config plugin to prevent worklet crashes on iOS app force-quit (react-native-worklets-core, react-native-reanimated, react-native-filament)",
   "main": "build/index.js",
   "types": "build/index.d.ts",

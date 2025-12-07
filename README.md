@@ -7,7 +7,7 @@ An Expo config plugin that prevents iOS crashes when users force-quit apps using
 
 ## The Problem
 
-When using worklet-based libraries in React Native, your app may crash with `SIGABRT` when the user force-quits from the iOS app switcher. The crash log typically shows:
+When using worklet-based libraries in React Native, your app may crash with `SIGABRT` or `EXC_BAD_ACCESS` when the user force-quits from the iOS app switcher. The crash log typically shows:
 
 ```
 Exception Type:  EXC_CRASH (SIGABRT)
@@ -17,15 +17,32 @@ Thread 1 Crashed:
   std::__terminate
 ```
 
+Or for 3D renderers like Filament:
+
+```
+Exception Type:  EXC_BAD_ACCESS (SIGSEGV)
+Thread 1 Crashed:
+  convertNSExceptionToJSError
+  filament::FEngine::destroy
+```
+
 This happens because:
-1. User swipes up to force-quit the app
-2. Worklets on background threads continue executing
-3. Worklets try to access the React Native bridge as it's being torn down
-4. Unhandled exception → crash
+1. User opens app switcher (app enters background/inactive state)
+2. Native module cleanup begins (e.g., Filament teardown)
+3. Cleanup throws an exception
+4. React tries to marshal the exception to JavaScript
+5. Hermes runtime is already torn down or accessed from wrong thread → **crash**
+
+### Why `applicationWillTerminate` isn't enough
+
+On iOS 13+, `applicationWillTerminate` is **not reliably called** when users swipe away apps in the app switcher. iOS often just kills the process without calling it. This plugin addresses that by also posting notifications when the app enters the background.
 
 ## The Solution
 
-This plugin adds an `applicationWillTerminate` handler to your iOS `AppDelegate.swift` that notifies the React Native bridge to invalidate before worklets can cause a crash.
+This plugin adds lifecycle handlers to your iOS `AppDelegate.swift` that post notifications for native modules to prepare for and handle termination safely:
+
+1. **`applicationDidEnterBackground`** - Posts early warning notification
+2. **`applicationWillTerminate`** - Posts bridge invalidation notification (when called)
 
 ## Installation
 
@@ -60,9 +77,19 @@ That's it! The plugin automatically adds the cleanup code during prebuild.
 
 ## What It Does
 
-The plugin adds this method to your `AppDelegate.swift`:
+The plugin adds these methods to your `AppDelegate.swift`:
 
 ```swift
+// Early warning when app enters background (always called)
+public override func applicationDidEnterBackground(_ application: UIApplication) {
+    NotificationCenter.default.post(
+        name: NSNotification.Name("RNAppDidEnterBackground"),
+        object: self
+    )
+    super.applicationDidEnterBackground(application)
+}
+
+// Bridge invalidation on termination (not always called on iOS 13+)
 public override func applicationWillTerminate(_ application: UIApplication) {
     NotificationCenter.default.post(
         name: NSNotification.Name("RCTBridgeWillInvalidateNotification"),
@@ -72,7 +99,14 @@ public override func applicationWillTerminate(_ application: UIApplication) {
 }
 ```
 
-This notification tells the React Native bridge to begin cleanup, which cancels pending worklet operations before they can crash.
+### Notifications
+
+| Notification | When | Use Case |
+|-------------|------|----------|
+| `RNAppDidEnterBackground` | App enters background | Pause render callbacks, prepare for potential termination |
+| `RCTBridgeWillInvalidateNotification` | App terminating | Cancel pending worklet operations |
+
+The background notification is the more reliable signal since it's always called, unlike `applicationWillTerminate`.
 
 ## Affected Libraries
 
@@ -107,44 +141,66 @@ function MyComponent() {
 }
 ```
 
-### Stop rendering when app is inactive
+### Pause rendering when app is inactive (DON'T unmount!)
+
+**Important:** Don't conditionally unmount 3D views when the app backgrounds. Unmounting triggers native cleanup which can race with Hermes teardown and crash. Instead, keep the view mounted but skip rendering:
 
 ```typescript
 import { useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, View, StyleSheet } from 'react-native';
+import { useSharedValue } from 'react-native-worklets-core';
 
 function My3DViewer() {
-  const [isActive, setIsActive] = useState(true);
+  const [isActive, setIsActive] = useState(AppState.currentState === 'active');
+  const isActiveShared = useSharedValue(true);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
-      setIsActive(state === 'active');
+      const active = state === 'active';
+      setIsActive(active);
+      isActiveShared.value = active;
     });
     return () => subscription.remove();
   }, []);
 
-  if (!isActive) {
-    return <View style={styles.placeholder} />;
-  }
-
-  return <FilamentView>{/* ... */}</FilamentView>;
+  return (
+    <View style={styles.container}>
+      {/* Always keep FilamentScene mounted - never conditionally unmount! */}
+      <FilamentScene>
+        <SceneContent isAppActive={isActiveShared} />
+      </FilamentScene>
+      {/* Overlay when paused */}
+      {!isActive && <View style={StyleSheet.absoluteFill} />}
+    </View>
+  );
 }
+
+// In your render callback:
+useRenderCallback(() => {
+  'worklet';
+  // Skip rendering when backgrounded - prevents race conditions
+  if (!isAppActive.value) return;
+  // ... render logic
+});
 ```
 
-### Early bail-out in render callbacks
+### Guard worklet execution on unmount
 
 ```typescript
-const isActive = useSharedValue(true);
+const isSceneActive = useSharedValue(true);
 
 useEffect(() => {
+  isSceneActive.value = true;
   return () => {
-    isActive.value = false;
+    // Mark inactive before unmount to prevent worklet crashes
+    isSceneActive.value = false;
   };
 }, []);
 
 useRenderCallback(() => {
   'worklet';
-  if (!isActive.value) return;
+  // Bail out if scene is being torn down
+  if (!isSceneActive.value) return;
   // ... render logic
 });
 ```
